@@ -27,6 +27,9 @@ export type Decision = {
   probabilities?: Record<string, number>;
 };
 
+/** A page offered while someone types, with how well it fits (0 to 1). */
+export type Suggestion<P = Page> = { page: P; score: number };
+
 /**
  * Something that can pick one option from a fixed list: a decision model, an LLM held to a list of
  * choices, embeddings. It throws (or rejects) on any failure and Wayfinder falls back to word
@@ -35,4 +38,10 @@ export type Decision = {
  */
 export interface Provider {
   choose(choice: Choice, context: { signal: AbortSignal }): Promise<Decision>;
+  /**
+   * Optional, for suggestions: how well each option fits `state`, from 0 to 1, each on its own
+   * rather than shared out between them, so several can fit well. `choice.options` has no `none`.
+   * Options left out count as 0. Without it, suggestions come from word matching.
+   */
+  score?(choice: Choice, context: { signal: AbortSignal }): Promise<Record<string, number>>;
 }

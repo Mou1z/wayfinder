@@ -76,6 +76,49 @@ describe("openRouter", () => {
     await expect(provider.choose(choice, { signal })).rejects.toThrow("offline");
   });
 
+  it("scores each option with its own yes-or-no question, in one request", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          answers: { page_0: { type: "noul", noul: 0.91 }, page_1: { type: "noul", noul: "?" } },
+        }),
+      ),
+    );
+    const options = { "children-s-events": "Story time and craft clubs", "local-history": "Old maps" };
+    expect(
+      await openRouter({ apiKey: "k" }).score!({ ...choice, options }, { signal }),
+    ).toEqual({ "children-s-events": 0.91 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(body.provider).toEqual({ data_collection: "deny" });
+    expect(body.questions).toEqual({
+      page_0: {
+        type: "noul",
+        instructions: "Which page?",
+        criteria: {
+          true: "This page answers it. Story time and craft clubs",
+          false: "This page doesn't answer what they're looking for",
+        },
+      },
+      page_1: {
+        type: "noul",
+        instructions: "Which page?",
+        criteria: {
+          true: "This page answers it. Old maps",
+          false: "This page doesn't answer what they're looking for",
+        },
+      },
+    });
+  });
+
+  it("throws when scoring gets an error status or no scores", async () => {
+    const provider = openRouter({ apiKey: "k" });
+    fetchMock.mockResolvedValue(answer({}, 429));
+    await expect(provider.score!(choice, { signal })).rejects.toThrow("OpenRouter answered 429");
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ answers: {} })));
+    await expect(provider.score!(choice, { signal })).rejects.toThrow("no scores");
+  });
+
   it("can't be created without a key, or in a browser", () => {
     expect(() => openRouter({ apiKey: "" })).toThrow("needs an apiKey");
     vi.stubGlobal("window", {});
