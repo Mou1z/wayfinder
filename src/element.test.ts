@@ -48,12 +48,12 @@ describe("<wayfinder-search>", () => {
     expect(input().value).toBe("");
   });
 
-  it("lets the host route instead by cancelling wayfinder-result", async () => {
+  it("lets the host route instead by cancelling wayfinder-navigate", async () => {
     respond({ kind: "page", page: { href: "/hours", title: "Opening hours" } });
     const seen = vi.fn((event: Event) => event.preventDefault());
-    element().addEventListener("wayfinder-result", seen);
+    element().addEventListener("wayfinder-navigate", seen);
     await search("hours");
-    expect(seen.mock.calls[0]![0]).toMatchObject({ detail: { kind: "page" } });
+    expect(seen.mock.calls[0]![0]).toMatchObject({ detail: { title: "Opening hours" } });
     expect(assign).not.toHaveBeenCalled();
   });
 
@@ -99,5 +99,71 @@ describe("<wayfinder-search>", () => {
     await search("hours");
     expect(assign).not.toHaveBeenCalled();
     expect(panel().textContent).toContain("isn't working");
+  });
+
+  it("drops its own look with unstyled, keeping what it needs to work", () => {
+    expect(shadow().querySelectorAll("style")).toHaveLength(2);
+    element().setAttribute("unstyled", "");
+    expect(shadow().querySelectorAll("style")).toHaveLength(1);
+  });
+});
+
+describe("<wayfinder-search suggest>", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<wayfinder-search endpoint="/api/search" suggest suggest-cooldown="0"></wayfinder-search>`;
+  });
+
+  const list = () => shadow().querySelector<HTMLElement>('[role="listbox"]')!;
+  const key = (key: string) => input().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  async function type(text: string) {
+    fetchMock.mockResolvedValue(
+      Response.json({
+        suggestions: [
+          { page: { href: "/study", title: "Study rooms" }, score: 0.92 },
+          { page: { href: "/hours", title: "Opening hours" }, score: 0.71 },
+        ],
+      }),
+    );
+    input().value = text;
+    input().dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(list().hidden).toBe(false));
+  }
+
+  it("is a combobox that lists matching pages with their scores", async () => {
+    expect(input().getAttribute("role")).toBe("combobox");
+    expect(input().getAttribute("aria-expanded")).toBe("false");
+    await type("somewhere to study");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({ query: "somewhere to study", suggest: true });
+    expect(input().getAttribute("aria-expanded")).toBe("true");
+    const options = [...list().querySelectorAll('[role="option"]')];
+    expect(options.map((o) => o.textContent)).toEqual(["Study rooms92% match", "Opening hours71% match"]);
+  });
+
+  it("moves through the suggestions with the arrow keys, and goes on Enter", async () => {
+    await type("somewhere to study");
+    input().focus();
+    key("ArrowDown");
+    key("ArrowDown");
+    expect(input().getAttribute("aria-activedescendant")).toBe("suggestion-1");
+    key("ArrowDown");
+    expect(input().hasAttribute("aria-activedescendant")).toBe(false);
+    key("ArrowUp");
+    expect(list().querySelector('[aria-selected="true"]')!.textContent).toContain("Opening hours");
+    key("Enter");
+    expect(assign).toHaveBeenCalledWith(new URL("/hours", location.href).href);
+  });
+
+  it("goes to a suggestion that's clicked", async () => {
+    await type("somewhere to study");
+    list().querySelector<HTMLElement>('[role="option"]')!.click();
+    expect(assign).toHaveBeenCalledWith(new URL("/study", location.href).href);
+  });
+
+  it("closes the suggestions on Escape", async () => {
+    await type("somewhere to study");
+    input().focus();
+    key("Escape");
+    expect(list().hidden).toBe(true);
+    expect(input().getAttribute("aria-expanded")).toBe("false");
   });
 });
