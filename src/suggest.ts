@@ -1,6 +1,7 @@
 import { withDeadline } from "./deadline.ts";
 import { catalogOf } from "./catalog.ts";
 import { scorePages } from "./match.ts";
+import { visitorState } from "./options.ts";
 import type { Choice, Page, Provider, Suggestion } from "./types.ts";
 
 export type SuggestOptions = {
@@ -46,9 +47,7 @@ export async function suggestPages<P extends Page>(
 
   const { names, descriptions } = catalogOf(pages);
   const choice: Choice = {
-    state: options.site
-      ? { site: options.site, visitor_search: wanted.trim() }
-      : { visitor_search: wanted.trim() },
+    state: visitorState(wanted.trim(), options.site),
     instructions:
       options.instructions ??
       `A visitor is typing this into the search box of ${options.site ?? "a website"}, and may not have finished. Would this page of the site answer what they are looking for?`,

@@ -43,7 +43,8 @@ export type SuggestResponse = { suggestions: Suggestion<PageLink>[] };
  * Something that can pick one option from a fixed list: a decision model, an LLM held to a list of
  * choices, embeddings. It throws (or rejects) on any failure and Wayfinder falls back to word
  * matching; an answer that isn't one of the options is treated the same way, so a provider can't
- * send anyone off the list. It should stop work when `signal` aborts.
+ * send anyone off the list. It should stop work when `signal` aborts. Its errors go to
+ * `onFallback`, which hosts may log, so they must never contain what was searched for.
  */
 export interface Provider {
   choose(choice: Choice, context: { signal: AbortSignal }): Promise<Decision>;

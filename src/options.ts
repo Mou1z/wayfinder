@@ -1,5 +1,9 @@
 import type { Page } from "./types.ts";
 
+/** What a provider is told about a search: what was typed, and on which site. */
+export const visitorState = (query: string, site: string | undefined): Record<string, unknown> =>
+  site ? { site, visitor_search: query } : { visitor_search: query };
+
 /** The option meaning no page fits. */
 export const NONE = "none";
 

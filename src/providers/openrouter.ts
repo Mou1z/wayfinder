@@ -38,7 +38,10 @@ export function openRouter({ apiKey, model }: OpenRouterOptions): Provider {
       signal,
     });
     if (!response.ok) throw new Error(`OpenRouter answered ${response.status}`);
-    const body: unknown = await response.json();
+    // Not the parser's own error: that quotes the body, which can echo the search.
+    const body: unknown = await response.json().catch(() => {
+      throw new Error("OpenRouter's answer wasn't JSON");
+    });
     return isRecord(body) && isRecord(body.answers) ? body.answers : {};
   }
 

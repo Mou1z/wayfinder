@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "demo": "pnpm build && node examples/demo/server.ts"
