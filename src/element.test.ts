@@ -153,6 +153,18 @@ describe("<wayfinder-search suggest>", () => {
     expect(assign).toHaveBeenCalledWith(new URL("/hours", location.href).href);
   });
 
+  it("searches for new text on Enter, not the suggestion chosen for the old", async () => {
+    await type("somewhere to study");
+    input().focus();
+    key("ArrowDown");
+    fetchMock.mockResolvedValue(Response.json({ kind: "none" }));
+    input().value = "council tax";
+    input().dispatchEvent(new Event("input"));
+    expect(input().hasAttribute("aria-activedescendant")).toBe(false);
+    key("Enter"); // Not a submit in happy-dom, but it mustn't go anywhere.
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it("goes to a suggestion that's clicked", async () => {
     await type("somewhere to study");
     list().querySelector<HTMLElement>('[role="option"]')!.click();

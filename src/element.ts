@@ -126,7 +126,10 @@ export class WayfinderSearch extends Base {
       event.preventDefault();
       void this.#client?.submit(this.#input.value);
     });
-    this.#input.addEventListener("input", () => this.#client?.type(this.#input.value));
+    this.#input.addEventListener("input", () => {
+      this.#choose(-1); // What's chosen was for the old text: Enter searches the new.
+      this.#client?.type(this.#input.value);
+    });
     this.#root.addEventListener("keydown", (event) => this.#key(event as KeyboardEvent));
     // Choosing a suggestion with the mouse shouldn't take focus from the box.
     this.#list.addEventListener("pointerdown", (event) => event.preventDefault());
