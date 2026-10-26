@@ -70,11 +70,13 @@ export function createSearch(options: SearchOptions): SearchClient {
   const listeners = new Set<(state: SearchState) => void>();
   const remembered = new Map<string, Suggestion<PageLink>[]>();
   let state = IDLE;
-  let typed = "";
+  let typed = ""; // What's in the box, trimmed.
+  let submitted = ""; // What's being searched for.
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastAsked = -Infinity;
   let suggesting: AbortController | undefined;
   let searching: AbortController | undefined;
+  let destroyed = false;
 
   const set = (next: Partial<SearchState>) => {
     state = { ...state, ...next };
@@ -86,7 +88,7 @@ export function createSearch(options: SearchOptions): SearchClient {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+      signal: either(signal, timeoutMs),
     });
     if (!response.ok) throw new Error(`The search endpoint answered ${response.status}`);
     return response.json() as Promise<unknown>;
@@ -95,6 +97,12 @@ export function createSearch(options: SearchOptions): SearchClient {
   const stopSuggesting = () => {
     clearTimeout(timer);
     suggesting?.abort();
+    suggesting = undefined;
+  };
+
+  const stopSearching = () => {
+    searching?.abort();
+    searching = undefined;
   };
 
   async function suggest(query: string) {
@@ -105,14 +113,16 @@ export function createSearch(options: SearchOptions): SearchClient {
       const found = parseSuggestions(await post({ query, suggest: true }, controller.signal));
       remembered.set(query, found);
       if (remembered.size > REMEMBERED) remembered.delete(remembered.keys().next().value!);
-      if (typed === query && state.status !== "searching") set({ suggestions: found });
+      if (suggesting === controller && typed === query) set({ suggestions: found });
     } catch {
       // Suggestions are a nicety: without them, the search still works.
     }
   }
 
   const go = (page: PageLink) => {
+    if (destroyed) return;
     stopSuggesting();
+    stopSearching();
     set(IDLE);
     navigate(page);
   };
@@ -124,15 +134,21 @@ export function createSearch(options: SearchOptions): SearchClient {
 
     subscribe(listener) {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      return () => void listeners.delete(listener);
     },
 
     type(text) {
-      typed = text.trimStart();
-      if (state.status !== "idle" && state.status !== "searching") set({ status: "idle", pages: [] });
+      if (destroyed) return;
+      typed = text.trim();
+      // New words replace the answer on show, or the search under way for the old ones.
+      if (state.status === "searching") {
+        if (typed === submitted) return;
+        stopSearching();
+      }
+      if (state.status !== "idle") set({ status: "idle", pages: [] });
       clearTimeout(timer);
-      if (!options.suggest || typed.trim().length < minLength) {
-        suggesting?.abort();
+      if (!options.suggest || typed.length < minLength) {
+        stopSuggesting();
         if (state.suggestions.length > 0) set({ suggestions: [] });
         return;
       }
@@ -144,16 +160,17 @@ export function createSearch(options: SearchOptions): SearchClient {
 
     async submit(text) {
       const query = text.trim();
-      if (!query) return;
+      if (!query || destroyed) return;
       stopSuggesting();
-      searching?.abort();
+      stopSearching();
       const controller = (searching = new AbortController());
+      submitted = typed = query;
       set({ status: "searching", pages: [], suggestions: [] });
       let result: SearchResponse | undefined;
       try {
         result = parseResult(await post({ query }, controller.signal));
       } catch {
-        if (controller.signal.aborted) return; // A newer search took over, or the box went away.
+        // An error, unless a newer search took over or the box went away (checked next).
       }
       if (searching !== controller) return;
       searching = undefined;
@@ -165,17 +182,29 @@ export function createSearch(options: SearchOptions): SearchClient {
     go,
 
     dismiss() {
-      clearTimeout(timer);
-      if (state.status !== "searching") set(IDLE);
-      else if (state.suggestions.length > 0) set({ suggestions: [] });
+      stopSuggesting();
+      if (state.status === "searching") set({ suggestions: [] });
+      else if (state !== IDLE) set(IDLE);
     },
 
     destroy() {
+      destroyed = true;
       stopSuggesting();
-      searching?.abort();
+      stopSearching();
       listeners.clear();
     },
   };
+}
+
+// Aborts when `signal` does or `ms` pass (AbortSignal.any isn't in every browser yet).
+function either(signal: AbortSignal, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms);
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([signal, timeout]);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  timeout.addEventListener("abort", abort, { once: true });
+  return controller.signal;
 }
 
 // What the endpoint sent, if the search box can act on it. Only http(s) links are followed,
@@ -206,8 +235,11 @@ function parseSuggestions(body: unknown): Suggestion<PageLink>[] {
 function link(page: unknown): PageLink | undefined {
   const { href, title } = (page ?? {}) as { href?: unknown; title?: unknown };
   if (typeof href !== "string" || typeof title !== "string") return undefined;
-  const url = URL.parse(href, location.href);
-  return url && (url.protocol === "http:" || url.protocol === "https:")
-    ? { href: url.href, title }
-    : undefined;
+  let url: URL;
+  try {
+    url = new URL(href, location.href);
+  } catch {
+    return undefined;
+  }
+  return url.protocol === "http:" || url.protocol === "https:" ? { href: url.href, title } : undefined;
 }

@@ -137,6 +137,54 @@ describe("createSearch: suggestions", () => {
     expect(search.state.suggestions).toEqual([]);
   });
 
+  it("drops a search when the visitor types something else, and goes only once", async () => {
+    let answer!: (response: Response) => void;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => (answer = resolve)));
+    const search = createSearch({ endpoint: "/api/search", suggest: true, navigate });
+    const searched = search.submit("parking");
+    search.type("parking"); // Same words: the search goes on.
+    expect(search.state.status).toBe("searching");
+    search.type("opening hours");
+    expect(search.state.status).toBe("idle");
+    answer(Response.json({ kind: "page", page: hours }));
+    await searched;
+    expect(navigate).not.toHaveBeenCalled();
+    expect(search.state.status).toBe("idle");
+  });
+
+  it("stays closed after dismiss, even when a request was on its way", async () => {
+    let answer!: (response: Response) => void;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => (answer = resolve)));
+    const search = createSearch({ endpoint: "/api/search", suggest: true });
+    search.type("open");
+    await vi.advanceTimersByTimeAsync(300);
+    search.dismiss();
+    answer(suggestions("x"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(search.state.suggestions).toEqual([]);
+  });
+
+  it("asks once for the same words, whatever the spaces around them", async () => {
+    fetchMock.mockImplementation(async () => suggestions("x"));
+    const search = createSearch({ endpoint: "/api/search", suggest: true, cooldownMs: 0 });
+    search.type("print");
+    await vi.advanceTimersByTimeAsync(300);
+    search.type("print ");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing once destroyed", async () => {
+    const search = createSearch({ endpoint: "/api/search", suggest: true, navigate });
+    search.destroy();
+    search.type("opening hours");
+    await search.submit("opening hours");
+    search.go(hours);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("goes to a suggestion", async () => {
     fetchMock.mockResolvedValue(suggestions("x"));
     const search = createSearch({ endpoint: "/api/search", suggest: true, navigate });
