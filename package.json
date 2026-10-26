@@ -1,0 +1,39 @@
+{
+  "name": "wayfinder-search",
+  "version": "0.1.0",
+  "description": "Site search that sends people to the one page that fits, instead of listing results.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./element": {
+      "types": "./dist/element.d.ts",
+      "default": "./dist/element.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": [
+    "./dist/element.js"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "demo": "pnpm build && node examples/demo/server.ts"
+  },
+  "packageManager": "pnpm@12.4.2",
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "happy-dom": "21.0.4",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
