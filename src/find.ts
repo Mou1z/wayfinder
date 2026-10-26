@@ -1,3 +1,4 @@
+import { withDeadline } from "./deadline.ts";
 import { rankPages } from "./match.ts";
 import { NONE, optionNames } from "./options.ts";
 import type { Choice, Decision, FindResult, Page, Provider } from "./types.ts";
@@ -73,7 +74,11 @@ export async function findPage<P extends Page>(
 
   let decision: Decision;
   try {
-    decision = await decide(provider, choice, options.timeoutMs ?? 6000, options.signal);
+    decision = await withDeadline(
+      (signal) => provider.choose(choice, { signal }),
+      options.timeoutMs ?? 6000,
+      options.signal,
+    );
     if (decision.choice !== NONE && !named.has(decision.choice))
       throw new Error("The provider answered with something that isn't one of the options");
   } catch (error) {
@@ -101,25 +106,4 @@ export async function findPage<P extends Page>(
     : [...new Set([...(page ? [page] : []), ...rankPages(wanted, pages)])];
   const offered = likely.slice(0, unsureLimit);
   return offered.length > 0 ? { kind: "unsure", pages: offered } : { kind: "none" };
-}
-
-// The provider's answer, or a rejection when it fails, `timeoutMs` passes or `outer` aborts, even
-// if the provider ignores its signal.
-function decide(
-  provider: Provider,
-  choice: Choice,
-  timeoutMs: number,
-  outer: AbortSignal | undefined,
-): Promise<Decision> {
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const signal = outer ? AbortSignal.any([outer, timeout]) : timeout;
-  return new Promise<Decision>((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const abort = () => reject(signal.reason);
-    signal.addEventListener("abort", abort, { once: true });
-    Promise.resolve()
-      .then(() => provider.choose(choice, { signal }))
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener("abort", abort));
-  });
 }
