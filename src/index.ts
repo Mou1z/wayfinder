@@ -2,7 +2,13 @@
 // from. In the browser, use "wayfinder-search/element" (the ready-made search box) or
 // "wayfinder-search/client" (to build your own).
 
-export { createWayfinder, type Wayfinder, type WayfinderOptions } from "./wayfinder.ts";
+export {
+  createWayfinder,
+  type NodeRequest,
+  type NodeResponse,
+  type Wayfinder,
+  type WayfinderOptions,
+} from "./wayfinder.ts";
 export { findPage, type FindOptions } from "./find.ts";
 export { suggestPages, type SuggestOptions } from "./suggest.ts";
 export { matchPage, rankPages, scorePages } from "./match.ts";

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createWayfinder } from "../../src/index.ts";
+import { createServer, type ServerResponse } from "node:http";
+import { createWayfinder, DEFAULT_OPENROUTER_MODEL } from "../../src/index.ts";
 import { PAGES } from "./pages.ts";
 
 // The demo: Fernhollow Library's pages, each with the search box in its header, and the endpoint
@@ -22,22 +22,16 @@ const wayfinder = createWayfinder({
 });
 
 // What the browser may load from dist/.
-const SCRIPTS = new Set(["/element.js", "/element.js.map", "/client.js", "/client.js.map"]);
+const SCRIPTS = new Set(["/element.js", "/client.js"]);
 
 const server = createServer(async (request, response) => {
   const { pathname } = new URL(request.url ?? "/", "http://localhost");
   try {
-    if (request.method === "POST" && pathname === "/api/search") {
-      // If the visitor gives up, so does the search.
-      const gone = new AbortController();
-      response.on("close", () => gone.abort());
-      const { status, body } = await wayfinder.answer(JSON.parse(await readBody(request, 4096)), gone.signal);
-      return send(response, status, "application/json", JSON.stringify(body));
-    }
+    if (pathname === "/api/search") return await wayfinder.node(request, response);
     if (request.method !== "GET") return send(response, 405, "text/plain", "Method not allowed");
     if (SCRIPTS.has(pathname)) {
       const file = await readFile(new URL(`dist${pathname}`, root));
-      return send(response, 200, pathname.endsWith(".js") ? "text/javascript" : "application/json", file);
+      return send(response, 200, "text/javascript", file);
     }
     if (pathname === "/ask") return send(response, 200, "text/html", layout(ASK));
     if (pathname === "/build-your-own") return send(response, 200, "text/html", layout(CUSTOM));
@@ -46,8 +40,6 @@ const server = createServer(async (request, response) => {
     send(response, 404, "text/html", layout(MISSING));
   } catch (error) {
     if (response.headersSent || response.destroyed) return;
-    if (error instanceof SyntaxError) return send(response, 400, "application/json", '{"error":"Send JSON"}');
-    if (error instanceof RangeError) return send(response, 413, "application/json", '{"error":"Too large"}');
     console.error(`Request failed: ${describe(error)}`);
     send(response, 500, "text/plain", "Something went wrong");
   }
@@ -57,7 +49,7 @@ server.listen(port, () => {
   console.log(`Fernhollow Library demo: http://localhost:${port}`);
   console.log(
     process.env.OPENROUTER_API_KEY
-      ? `Choosing with OpenRouter (${process.env.OPENROUTER_MODEL || "typesafe/jev-1.14"}).`
+      ? `Choosing with OpenRouter (${process.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL}).`
       : "No OPENROUTER_API_KEY, so word matching answers. Add one to .env to use Jev.",
   );
 });
@@ -186,21 +178,6 @@ function send(response: ServerResponse, status: number, type: string, body: stri
   response.writeHead(status, { "Content-Type": `${type}; charset=utf-8` }).end(body);
 }
 
-function readBody(request: IncomingMessage, limit: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    request.setEncoding("utf8");
-    request.on("data", (chunk: string) => {
-      body += chunk;
-      if (body.length > limit) {
-        reject(new RangeError("Body too large"));
-        request.destroy();
-      }
-    });
-    request.on("end", () => resolve(body));
-    request.on("error", reject);
-  });
-}
 
 const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
 

@@ -7,11 +7,11 @@ const pages = [
   { href: "/hours", title: "Opening hours", about: "When each branch is open, and holidays", secret: 2 },
 ];
 
-const post = (body: unknown, init: RequestInit = {}) =>
+const post = (body: unknown, type = "application/json") =>
   new Request("http://localhost/api/search", {
     method: "POST",
+    headers: { "Content-Type": type },
     body: typeof body === "string" ? body : JSON.stringify(body),
-    ...init,
   });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -77,5 +77,72 @@ describe("createWayfinder", () => {
     expect((await handle(post({ query: 3 }))).status).toBe(400);
     expect((await handle(post({ query: "a".repeat(1001) }))).status).toBe(400);
     expect((await handle(post({ query: "x".repeat(5000) }))).status).toBe(413);
+    expect((await handle(post({ query: "hours" }, "text/plain"))).status).toBe(415);
+  });
+
+  it("stops reading a body as soon as it's too large, whatever its length says", async () => {
+    let sent = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1024;
+        controller.enqueue(new Uint8Array(1024).fill(32));
+      },
+    });
+    const request = new Request("http://localhost/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: endless,
+      duplex: "half",
+    } as RequestInit);
+    expect((await createWayfinder({ pages }).handle(request)).status).toBe(413);
+    expect(sent).toBeLessThan(10_000);
+  });
+
+  it("keeps its own copy of the pages", async () => {
+    const list = [...pages];
+    const wayfinder = createWayfinder({ pages: list });
+    list.push({ href: "/print", title: "Printing", about: "Print and scan", secret: 3 });
+    expect(await wayfinder.find("printing")).toEqual({ kind: "none" });
+    expect(await wayfinder.find("opening hours")).toMatchObject({ kind: "page", page: { href: "/hours" } });
+  });
+
+  it("serves Node and Express requests, read or already parsed", async () => {
+    const { node } = createWayfinder({ pages });
+    const respond = () => {
+      const response = {
+        statusCode: 0,
+        headers: {} as Record<string, string>,
+        body: "",
+        setHeader(name: string, value: string) {
+          this.headers[name] = value;
+        },
+        end(body: string) {
+          this.body = body;
+        },
+        on: vi.fn(),
+      };
+      return response;
+    };
+    const streamed = Object.assign(
+      (async function* () {
+        yield new TextEncoder().encode('{"query":"lost');
+        yield ' card"}';
+      })(),
+      { method: "POST", headers: { "content-type": "application/json; charset=utf-8" } },
+    );
+    const first = respond();
+    await node(streamed, first);
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["Cache-Control"]).toBe("no-store");
+    expect(JSON.parse(first.body)).toMatchObject({ kind: "page", page: { href: "/join" } });
+
+    const parsed = Object.assign((async function* () {})(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: { query: "opening hours" },
+    });
+    const second = respond();
+    await node(parsed, second);
+    expect(JSON.parse(second.body)).toMatchObject({ kind: "page", page: { href: "/hours" } });
   });
 });
