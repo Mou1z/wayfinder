@@ -1,7 +1,7 @@
 {
   "name": "wayfinder-search",
   "version": "0.1.0",
-  "description": "Site search that sends people to the one page that fits, instead of listing results.",
+  "description": "Jev-powered search for websites: people type what they need and go straight to the page that fits.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
     },
     "./element": {
       "types": "./dist/element.d.ts",
@@ -35,5 +39,13 @@
     "happy-dom": "21.0.4",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
-  }
+  },
+  "keywords": [
+    "search",
+    "site-search",
+    "jev",
+    "openrouter",
+    "web-component",
+    "navigation"
+  ]
 }
