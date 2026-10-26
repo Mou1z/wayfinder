@@ -1,77 +1,64 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { findPage, openRouter, type FindResult } from "../../src/index.ts";
-import { PAGES, type LibraryPage } from "./pages.ts";
+import { createWayfinder } from "../../src/index.ts";
+import { PAGES } from "./pages.ts";
 
 // The demo: Fernhollow Library's pages, each with the search box in its header, and the endpoint
-// the box posts to. With OPENROUTER_API_KEY in .env a decision model chooses; without it, word
-// matching does. Nothing anyone types is logged or kept.
+// the box posts to. With OPENROUTER_API_KEY in .env, Jev chooses; without it, word matching does.
+// Nothing anyone types is logged or kept.
 
 const root = new URL("../../", import.meta.url);
 if (existsSync(new URL(".env", root))) process.loadEnvFile(new URL(".env", root));
-
-const key = process.env.OPENROUTER_API_KEY;
-const provider = key ? openRouter({ apiKey: key, model: process.env.OPENROUTER_MODEL }) : undefined;
 const port = Number(process.env.PORT) || 3000;
 
-async function search(request: IncomingMessage, response: ServerResponse) {
-  let query: unknown;
-  try {
-    query = JSON.parse(await readBody(request, 2048)).query;
-  } catch {
-    return send(response, 400, "application/json", JSON.stringify({ error: "Bad request" }));
-  }
-  if (typeof query !== "string" || !query.trim() || query.length > 200)
-    return send(response, 400, "application/json", JSON.stringify({ error: "Bad query" }));
+const wayfinder = createWayfinder({
+  pages: PAGES,
+  apiKey: process.env.OPENROUTER_API_KEY,
+  model: process.env.OPENROUTER_MODEL,
+  site: "Fernhollow Library, a public library with three branches",
+  threshold: 0.5,
+  onFallback: (error) => console.warn(`Fell back to word matching: ${describe(error)}`),
+});
 
-  // If the visitor gives up, so does the search.
-  const gone = new AbortController();
-  response.on("close", () => gone.abort());
-  const result = await findPage(query, PAGES, {
-    provider,
-    site: "Fernhollow Library, a public library with three branches",
-    threshold: 0.5,
-    signal: gone.signal,
-    onFallback: (error) => console.warn(`Fell back to word matching: ${describe(error)}`),
-  }).catch(() => undefined);
-  if (!result) return;
-  send(response, 200, "application/json", JSON.stringify(forBrowser(result)));
-}
-
-// Only what the search box needs: where each page is and what it's called.
-function forBrowser(result: FindResult<LibraryPage>) {
-  const link = ({ href, title }: LibraryPage) => ({ href, title });
-  if (result.kind === "page") return { ...result, page: link(result.page) };
-  if (result.kind === "unsure") return { kind: "unsure", pages: result.pages.map(link) };
-  return result;
-}
+// What the browser may load from dist/.
+const SCRIPTS = new Set(["/element.js", "/element.js.map", "/client.js", "/client.js.map"]);
 
 const server = createServer(async (request, response) => {
   const { pathname } = new URL(request.url ?? "/", "http://localhost");
   try {
-    if (request.method === "POST" && pathname === "/api/search") return await search(request, response);
+    if (request.method === "POST" && pathname === "/api/search") {
+      // If the visitor gives up, so does the search.
+      const gone = new AbortController();
+      response.on("close", () => gone.abort());
+      const { status, body } = await wayfinder.answer(JSON.parse(await readBody(request, 4096)), gone.signal);
+      return send(response, status, "application/json", JSON.stringify(body));
+    }
     if (request.method !== "GET") return send(response, 405, "text/plain", "Method not allowed");
-    if (pathname === "/element.js" || pathname === "/element.js.map") {
+    if (SCRIPTS.has(pathname)) {
       const file = await readFile(new URL(`dist${pathname}`, root));
       return send(response, 200, pathname.endsWith(".js") ? "text/javascript" : "application/json", file);
     }
     if (pathname === "/ask") return send(response, 200, "text/html", layout(ASK));
+    if (pathname === "/build-your-own") return send(response, 200, "text/html", layout(CUSTOM));
     const page = PAGES.find((p) => p.href === pathname);
     if (page) return send(response, 200, "text/html", layout(page));
     send(response, 404, "text/html", layout(MISSING));
   } catch (error) {
+    if (response.headersSent || response.destroyed) return;
+    if (error instanceof SyntaxError) return send(response, 400, "application/json", '{"error":"Send JSON"}');
+    if (error instanceof RangeError) return send(response, 413, "application/json", '{"error":"Too large"}');
     console.error(`Request failed: ${describe(error)}`);
-    if (!response.headersSent) send(response, 500, "text/plain", "Something went wrong");
+    send(response, 500, "text/plain", "Something went wrong");
   }
 });
 
 server.listen(port, () => {
   console.log(`Fernhollow Library demo: http://localhost:${port}`);
   console.log(
-    provider
+    process.env.OPENROUTER_API_KEY
       ? `Choosing with OpenRouter (${process.env.OPENROUTER_MODEL || "typesafe/jev-1.14"}).`
-      : "No OPENROUTER_API_KEY, so word matching answers. Add one to .env to use a model.",
+      : "No OPENROUTER_API_KEY, so word matching answers. Add one to .env to use Jev.",
   );
 });
 
@@ -82,6 +69,55 @@ const ASK = {
 };
 const MISSING = { title: "Not found", about: "There's no page here.", body: "Try the search box above." };
 
+// The same search, with a search box built from scratch on wayfinder-search/client.
+const CUSTOM = {
+  title: "Build your own search box",
+  about: "The search box in the header is ready-made. This one is built from scratch on the client, in a few lines.",
+  body: "View this page's source to see how.",
+  extra: `
+  <form id="ask" role="search" class="ask">
+    <label for="ask-input">Ask the library anything</label>
+    <div class="ask-row">
+      <input id="ask-input" type="search" autocomplete="off" placeholder="e.g. somewhere quiet to revise">
+      <button>Go</button>
+    </div>
+    <p id="ask-status" role="status"></p>
+    <ul id="ask-list"></ul>
+  </form>
+  <script type="module">
+    import { createSearch } from "/client.js";
+
+    const search = createSearch({ endpoint: "/api/search", suggest: true });
+    const form = document.querySelector("#ask");
+    const input = document.querySelector("#ask-input");
+    const status = document.querySelector("#ask-status");
+    const list = document.querySelector("#ask-list");
+
+    input.addEventListener("input", () => search.type(input.value));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      search.submit(input.value);
+    });
+
+    search.subscribe(({ status: now, pages, suggestions }) => {
+      status.textContent = {
+        idle: "", searching: "Looking…", error: "Search isn't working. Try again?",
+        none: "Nothing fits. Ask a librarian on 01632 960 000.", unsure: "One of these?",
+      }[now];
+      const shown = now === "unsure" ? pages.map((page) => ({ page })) : suggestions;
+      list.replaceChildren(...shown.map(({ page, score }) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = score ? page.title + " · " + Math.round(score * 100) + "%" : page.title;
+        button.onclick = () => search.go(page);
+        const item = document.createElement("li");
+        item.append(button);
+        return item;
+      }));
+    });
+  </script>`,
+};
+
 const EXAMPLES = [
   "my kid is bored on saturday",
   "I lost my card",
@@ -91,14 +127,16 @@ const EXAMPLES = [
   "listen to books in the car",
 ];
 
-function layout(page: { href?: string; title: string; about: string; body: string }) {
-  const examples =
-    page.href === "/"
+function layout(page: { href?: string; title: string; about: string; body: string; extra?: string }) {
+  const extra =
+    page.extra ??
+    (page.href === "/"
       ? `<h2>Things to try</h2><ul class="examples">${EXAMPLES.map((e) => `<li>${escape(e)}</li>`).join("")}</ul>
+         <p>Or see <a href="/build-your-own">a search box built from scratch</a> on the same endpoint.</p>
          <h2>Every page</h2><ul>${PAGES.slice(1)
            .map((p) => `<li><a href="${escape(p.href)}">${escape(p.title)}</a></li>`)
            .join("")}</ul>`
-      : "";
+      : "");
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -116,6 +154,13 @@ function layout(page: { href?: string; title: string; about: string; body: strin
     .examples li { font-style: italic; }
     a { color: var(--accent); }
     wayfinder-search { --wayfinder-accent: var(--accent); }
+    .ask { margin-top: 2rem; padding: 1.5rem; border-radius: 1rem; background: color-mix(in srgb, var(--accent) 10%, Canvas); }
+    .ask label { display: block; font-weight: 600; margin-bottom: .5rem; }
+    .ask-row { display: flex; gap: .5rem; }
+    .ask input { flex: 1; min-width: 0; padding: .75rem 1rem; font: inherit; border: 2px solid var(--accent); border-radius: .5rem; }
+    .ask button { padding: .5rem 1rem; font: inherit; border: 0; border-radius: .5rem; background: var(--accent); color: Canvas; cursor: pointer; }
+    .ask ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+    .ask li button { background: Canvas; color: var(--accent); border: 1px solid var(--accent); }
     @media (prefers-color-scheme: dark) { :root { --accent: #7fc8a2; } wayfinder-search { --wayfinder-on-accent: #10261b; } }
   </style>
   <script type="module" src="/element.js"></script>
@@ -123,7 +168,7 @@ function layout(page: { href?: string; title: string; about: string; body: strin
 <body>
   <header>
     <a href="/">Fernhollow Library</a>
-    <wayfinder-search endpoint="/api/search" label="Search the library" placeholder="What do you need?">
+    <wayfinder-search endpoint="/api/search" suggest label="Search the library" placeholder="What do you need?">
       <p slot="none"><a href="/ask">Ask a librarian</a>: we'll find it with you.</p>
     </wayfinder-search>
   </header>
@@ -131,7 +176,7 @@ function layout(page: { href?: string; title: string; about: string; body: strin
     <h1>${escape(page.title)}</h1>
     <p class="lead">${escape(page.about)}</p>
     <p>${escape(page.body)}</p>
-    ${examples}
+    ${extra}
   </main>
 </body>
 </html>`;
@@ -148,7 +193,7 @@ function readBody(request: IncomingMessage, limit: number): Promise<string> {
     request.on("data", (chunk: string) => {
       body += chunk;
       if (body.length > limit) {
-        reject(new Error("Body too large"));
+        reject(new RangeError("Body too large"));
         request.destroy();
       }
     });
