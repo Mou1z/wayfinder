@@ -21,6 +21,9 @@ const TEXT = {
   "none-label": "Nothing on the site fits that.",
   "error-label": "Search isn't working right now. Please try again.",
   "suggestions-label": "Suggested pages",
+  "button-label": "Search",
+  "match-label": "match",
+  "count-label": "{n} found",
 } as const;
 type TextName = keyof typeof TEXT;
 
@@ -84,7 +87,7 @@ const SPINNER = `<span class="spinner" aria-hidden="true"></span>`;
 const Base = (typeof HTMLElement === "undefined" ? class {} : HTMLElement) as typeof HTMLElement;
 
 export class WayfinderSearch extends Base {
-  static observedAttributes = ["endpoint", "suggest", "suggest-cooldown", "label", "placeholder", "unstyled"];
+  static observedAttributes = ["endpoint", "suggest", "suggest-cooldown", "unstyled", ...Object.keys(TEXT)];
 
   #root = this.attachShadow({ mode: "open" });
   #look = document.createElement("style");
@@ -98,6 +101,7 @@ export class WayfinderSearch extends Base {
   #stop: (() => void) | undefined;
   #shown: SearchState | undefined;
   #active = -1; // The suggestion the arrow keys are on.
+  #connected = false;
 
   constructor() {
     super();
@@ -107,7 +111,7 @@ export class WayfinderSearch extends Base {
         <label part="label" for="query" class="hidden"></label>
         <div class="field" part="field">
           <input id="query" part="input" type="search" name="query" autocomplete="off" enterkeyhint="search" maxlength="200">
-          <button part="button" type="submit" aria-label="Search">${ICON}</button>
+          <button part="button" type="submit">${ICON}</button>
         </div>
       </form>
       <ul part="suggestions" id="suggestions" class="popup" role="listbox" hidden></ul>
@@ -138,27 +142,34 @@ export class WayfinderSearch extends Base {
       const chosen = this.#shown?.suggestions[Number(option?.getAttribute("data-index"))];
       if (chosen) this.#client?.go(chosen.page);
     });
+    // Tabbing away closes what's open (a click elsewhere is #outside).
+    this.addEventListener("focusout", (event) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && !this.#root.contains(next) && !this.contains(next)) this.#client?.dismiss();
+    });
   }
 
   connectedCallback() {
+    this.#connected = true;
     document.addEventListener("pointerdown", this.#outside);
     this.#setUp();
   }
 
   disconnectedCallback() {
+    this.#connected = false;
     document.removeEventListener("pointerdown", this.#outside);
     this.#tearDown();
   }
 
   attributeChangedCallback(name: string) {
-    if (!this.isConnected) return;
+    if (!this.#connected) return; // connectedCallback sets everything up.
     if (name === "endpoint" || name === "suggest" || name === "suggest-cooldown") {
-      this.#tearDown();
       this.#setUp();
     } else this.#text();
   }
 
   #setUp() {
+    this.#tearDown();
     this.#text();
     const endpoint = this.getAttribute("endpoint");
     if (!endpoint) return;
@@ -193,6 +204,7 @@ export class WayfinderSearch extends Base {
     this.#root.querySelector("label")!.textContent = this.#says("label");
     this.#input.placeholder = this.#says("placeholder");
     this.#list.setAttribute("aria-label", this.#says("suggestions-label"));
+    if (this.#shown?.status !== "searching") this.#button.setAttribute("aria-label", this.#says("button-label"));
     if (this.hasAttribute("unstyled")) this.#look.remove();
     else this.#root.append(this.#look);
   }
@@ -216,7 +228,7 @@ export class WayfinderSearch extends Base {
     if (searching !== (before?.status === "searching")) {
       this.#form.setAttribute("aria-busy", String(searching));
       this.#button.innerHTML = searching ? SPINNER : ICON;
-      this.#button.setAttribute("aria-label", searching ? this.#says("searching") : "Search");
+      this.#button.setAttribute("aria-label", this.#says(searching ? "searching" : "button-label"));
     }
     if (state.status !== before?.status || state.pages !== before?.pages) this.#renderPanel(state);
     if (state.suggestions !== before?.suggestions) this.#renderSuggestions(state);
@@ -248,6 +260,8 @@ export class WayfinderSearch extends Base {
         link.textContent = page.title;
         link.setAttribute("part", "option");
         link.addEventListener("click", (event) => {
+          // A new tab or window is the browser's to open.
+          if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
           this.#client?.go(page);
         });
@@ -259,7 +273,7 @@ export class WayfinderSearch extends Base {
     }
     this.#panel.hidden = false;
     this.#input.setAttribute("aria-describedby", "panel");
-    this.#announce(status === "unsure" ? `${message.textContent} ${pages.length} pages.` : message.textContent);
+    this.#announce(status === "unsure" ? `${message.textContent} ${this.#count(pages.length)}` : message.textContent);
   }
 
   #renderSuggestions({ suggestions }: SearchState) {
@@ -281,7 +295,7 @@ export class WayfinderSearch extends Base {
         match.textContent = `${Math.round(score * 100)}%`;
         const spoken = document.createElement("span");
         spoken.className = "hidden";
-        spoken.textContent = " match";
+        spoken.textContent = ` ${this.#says("match-label")}`;
         match.append(spoken);
         option.append(title, match);
         return option;
@@ -290,7 +304,11 @@ export class WayfinderSearch extends Base {
     const open = suggestions.length > 0;
     this.#list.hidden = !open;
     if (this.#input.hasAttribute("role")) this.#input.setAttribute("aria-expanded", String(open));
-    if (open) this.#announce(`${suggestions.length} suggested ${suggestions.length === 1 ? "page" : "pages"}.`);
+    if (open) this.#announce(`${this.#says("suggestions-label")}: ${this.#count(suggestions.length)}`);
+  }
+
+  #count(n: number) {
+    return this.#says("count-label").replace("{n}", String(n));
   }
 
   #announce(text: string) {

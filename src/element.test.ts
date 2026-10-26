@@ -171,6 +171,15 @@ describe("<wayfinder-search suggest>", () => {
     expect(assign).toHaveBeenCalledWith(new URL("/study", location.href).href);
   });
 
+  it("closes the suggestions when focus moves elsewhere on the page", async () => {
+    await type("somewhere to study");
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+    input().focus();
+    elsewhere.focus();
+    expect(list().hidden).toBe(true);
+  });
+
   it("closes the suggestions on Escape", async () => {
     await type("somewhere to study");
     input().focus();
