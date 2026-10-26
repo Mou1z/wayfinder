@@ -25,7 +25,7 @@ type TextName = keyof typeof TEXT;
 
 const STYLE = `
   :host { display: inline-block; position: relative; font: inherit; color: var(--wayfinder-fg, CanvasText);
-    --_accent: var(--wayfinder-accent, #2457d6); --_bg: var(--wayfinder-bg, Canvas);
+    --_accent: var(--wayfinder-accent, #2457d6); --_bg: var(--wayfinder-bg, Canvas); --_on-accent: var(--wayfinder-on-accent, #fff);
     --_line: var(--wayfinder-border, color-mix(in srgb, currentColor 30%, transparent));
     --_radius: var(--wayfinder-radius, 999px); }
   :host([hidden]) { display: none; }
@@ -38,7 +38,7 @@ const STYLE = `
   input { flex: 1; min-width: 0; border: 0; padding: .375rem 0; background: transparent; color: inherit; font: inherit; outline: none; }
   input::-webkit-search-cancel-button { cursor: pointer; }
   button { display: grid; place-items: center; width: 2rem; height: 2rem; flex: none; padding: 0; border: 0;
-    border-radius: 999px; background: var(--_accent); color: #fff; cursor: pointer; }
+    border-radius: 999px; background: var(--_accent); color: var(--_on-accent); cursor: pointer; }
   button:focus-visible { outline: 2px solid var(--_accent); outline-offset: 2px; }
   .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
     animation: spin .8s linear infinite; }
@@ -47,6 +47,7 @@ const STYLE = `
   [part="panel"] { position: absolute; z-index: 50; top: calc(100% + .5rem); inset-inline-end: 0; width: max(100%, 20rem);
     box-sizing: border-box; padding: 1rem; border: 1px solid var(--_line); border-radius: .75rem; background: var(--_bg);
     box-shadow: 0 12px 32px -12px rgb(0 0 0 / .3); }
+  @media (max-width: 40rem) { [part="panel"] { width: 100%; } }
   [part="panel"][hidden] { display: none; }
   [part="panel"] p { margin: 0; }
   ul { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .25rem; }
