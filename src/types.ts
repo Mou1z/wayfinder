@@ -30,6 +30,15 @@ export type Decision = {
 /** A page offered while someone types, with how well it fits (0 to 1). */
 export type Suggestion<P = Page> = { page: P; score: number };
 
+/** All the browser is told about a page. */
+export type PageLink = { href: string; title: string };
+
+/** What the endpoint answers a search with (`{ query }`). */
+export type SearchResponse = FindResult<PageLink>;
+
+/** What the endpoint answers a request for suggestions with (`{ query, suggest: true }`). */
+export type SuggestResponse = { suggestions: Suggestion<PageLink>[] };
+
 /**
  * Something that can pick one option from a fixed list: a decision model, an LLM held to a list of
  * choices, embeddings. It throws (or rejects) on any failure and Wayfinder falls back to word
