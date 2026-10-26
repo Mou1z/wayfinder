@@ -1,6 +1,6 @@
 import { withDeadline } from "./deadline.ts";
+import { catalogOf } from "./catalog.ts";
 import { scorePages } from "./match.ts";
-import { optionNames } from "./options.ts";
 import type { Choice, Page, Provider, Suggestion } from "./types.ts";
 
 export type SuggestOptions = {
@@ -44,7 +44,7 @@ export async function suggestPages<P extends Page>(
     scored.filter((s) => s.score >= minScore).slice(0, limit);
   if (!provider?.score) return best(scorePages(wanted, pages));
 
-  const names = optionNames(pages);
+  const { names, descriptions } = catalogOf(pages);
   const choice: Choice = {
     state: options.site
       ? { site: options.site, visitor_search: wanted.trim() }
@@ -52,7 +52,7 @@ export async function suggestPages<P extends Page>(
     instructions:
       options.instructions ??
       `A visitor is typing this into the search box of ${options.site ?? "a website"}, and may not have finished. Would this page of the site answer what they are looking for?`,
-    options: Object.fromEntries(pages.map((page, i) => [names[i]!, `${page.title}: ${page.about}`])),
+    options: descriptions,
   };
 
   let scores: Record<string, number>;

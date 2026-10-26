@@ -1,6 +1,7 @@
 import { withDeadline } from "./deadline.ts";
+import { catalogOf } from "./catalog.ts";
 import { rankPages } from "./match.ts";
-import { NONE, optionNames } from "./options.ts";
+import { NONE } from "./options.ts";
 import type { Choice, Decision, FindResult, Page, Provider } from "./types.ts";
 
 export type FindOptions = {
@@ -59,17 +60,13 @@ export async function findPage<P extends Page>(
   };
   if (!provider) return byWords();
 
-  const names = optionNames(pages);
-  const named = new Map(pages.map((page, i) => [names[i]!, page]));
+  const { byName: named, descriptions } = catalogOf(pages);
   const choice: Choice = {
     state: options.site ? { site: options.site, visitor_search: wanted } : { visitor_search: wanted },
     instructions:
       options.instructions ??
       `A visitor typed this into the search box of ${options.site ?? "a website"}. Which page of the site best answers what they are looking for?`,
-    options: Object.fromEntries([
-      ...pages.map((page, i) => [names[i]!, `${page.title}: ${page.about}`]),
-      [NONE, options.noneMeans ?? DEFAULT_NONE],
-    ]),
+    options: { ...descriptions, [NONE]: options.noneMeans ?? DEFAULT_NONE },
   };
 
   let decision: Decision;
