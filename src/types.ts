@@ -5,7 +5,7 @@ export type Page = { href: string; title: string; about: string };
  * Where a search goes: the one page that fits, a few that might when the model isn't sure enough
  * (only with a `threshold`), or none, which the host turns into its own fallback.
  */
-export type FindResult<P extends Page = Page> =
+export type FindResult<P = Page> =
   | { kind: "page"; page: P; confidence?: number }
   | { kind: "unsure"; pages: P[] }
   | { kind: "none" };
